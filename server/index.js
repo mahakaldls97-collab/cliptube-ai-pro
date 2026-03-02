@@ -58,6 +58,28 @@ const ytdl = require('@distube/ytdl-core');
 
 // ... (existing code)
 
+// Helper to parse Netscape Cookies for ytdl-core headers
+function getCookieString() {
+    const cookiesPath = path.join(__dirname, '../cookies.txt');
+    if (!fs.existsSync(cookiesPath)) return '';
+    try {
+        const content = fs.readFileSync(cookiesPath, 'utf8');
+        const lines = content.split('\n');
+        const cookiePairs = [];
+        lines.forEach(line => {
+            if (!line.trim() || line.startsWith('#')) return;
+            const parts = line.split('\t');
+            if (parts.length >= 7) {
+                cookiePairs.push(`${parts[5].trim()}=${parts[6].trim()}`);
+            }
+        });
+        return cookiePairs.join('; ');
+    } catch (e) {
+        console.error('[ERROR] Cookie parse failed:', e.message);
+        return '';
+    }
+}
+
 // yt-dlp bypass arguments - The "Ghost" Strategy
 function baseArgs() {
     const args = [
@@ -70,26 +92,10 @@ function baseArgs() {
 
     const cookiesPath = path.join(__dirname, '../cookies.txt');
     if (fs.existsSync(cookiesPath)) {
-        console.log('[SYSTEM] Using Cookies bypass from:', cookiesPath);
         args.push('--cookies', cookiesPath);
-    } else {
-        console.warn('[WARNING] cookies.txt NOT found!');
     }
 
     return args;
-}
-
-// Robust Cookie Helper for ytdl-core
-function getYtdlOptions() {
-    const options = {
-        requestOptions: {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            }
-        }
-    };
-    // Note: ytdl-core cookie handling is usually via agent or headers
-    return options;
 }
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
@@ -97,16 +103,27 @@ app.get('/api/test', (req, res) => {
     res.json({
         platform: process.platform,
         nodeVersion: process.version,
-        ytdlpPath: getYtDlpPath()
+        ytdlpPath: getYtDlpPath(),
+        cookiesFound: fs.existsSync(path.join(__dirname, '../cookies.txt'))
     });
 });
 
 // ─── Get video info with extreme bypass ───────────────────────────────────────
 async function getVideoInfo(url) {
-    // Strategy 1: ytdl-core (Very stable for metadata if not IP blocked)
+    const cookieString = getCookieString();
+
+    // Strategy 1: ytdl-core with Header Cookies
     try {
         console.log(`[SYSTEM] Metadata fetch (ytdl-core) for: ${url}`);
-        const info = await ytdl.getInfo(url, getYtdlOptions());
+        const options = {
+            requestOptions: {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Cookie': cookieString
+                }
+            }
+        };
+        const info = await ytdl.getInfo(url, options);
         if (info && info.videoDetails) {
             return {
                 title: info.videoDetails.title || 'Untitled Video',
@@ -114,15 +131,14 @@ async function getVideoInfo(url) {
             };
         }
     } catch (e) {
-        console.warn('[WARN] ytdl-core failed:', e.message);
+        console.warn('[WARN] ytdl-core failed, falling back:', e.message);
     }
 
-    // Strategy 2: yt-dlp with Cookies bypass (Ghost Strategy)
+    // Strategy 2: yt-dlp Ghost Strategy
     return new Promise((resolve, reject) => {
         const args = [
             '--dump-json',
             '--no-playlist',
-            '--flat-playlist',
             ...baseArgs(),
             url
         ];
@@ -144,14 +160,14 @@ async function getVideoInfo(url) {
                         duration: parseInt(parsed.duration || 0)
                     });
                 } catch (e) {
-                    reject(new Error('Data extraction failed. Refresh cookies?'));
+                    reject(new Error('Data parsing failed. YouTube format changed?'));
                 }
             } else {
                 console.error('[BYPASS FAIL]', stderr);
                 if (stderr.toLowerCase().includes('sign in') || stderr.toLowerCase().includes('bot')) {
-                    reject(new Error('YouTube block! Please refresh the cookies.txt from YouTube.com'));
+                    reject(new Error('YouTube block! Please refresh cookies.txt or wait 5 mins.'));
                 } else {
-                    reject(new Error('Video nahi mila. Link sahi hai na? Check karein.'));
+                    reject(new Error('Video details nahi mil pa rahi hain. Link ek baar check karle.'));
                 }
             }
         });
