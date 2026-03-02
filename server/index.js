@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const ffmpeg = require('ffmpeg-static');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -38,7 +39,6 @@ function getYtDlpPath() {
         const bundled = path.join(__dirname, '../yt-dlp-bin/yt-dlp');
         if (fs.existsSync(bundled)) {
             try {
-                // Ensure executable permissions from Node.js
                 fs.chmodSync(bundled, 0o755);
             } catch (e) {
                 console.warn('[WARN] Could not chmod yt-dlp binary:', e.message);
@@ -94,9 +94,10 @@ function baseArgs() {
     const args = [
         '--no-check-certificates',
         '--no-cache-dir',
-        '--force-ipv4', // CRITICAL: Cloud servers are often blocked on IPv6
-        '--socket-timeout', '30',
-        '--extractor-args', 'youtube:player_client=ios,android,mweb,web,tv',
+        '--force-ipv4',
+        '--socket-timeout', '60',
+        '--geo-bypass',
+        '--extractor-args', 'youtube:player_client=android,web,ios',
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ];
 
@@ -160,8 +161,8 @@ async function getVideoInfo(url) {
             url
         ];
 
-        addLog(`Trying yt-dlp Ghost Bypass (IPv4)...`);
-        const proc = spawn(getYtDlpPath(), args, { timeout: 60000 });
+        addLog(`Trying yt-dlp Ghost Bypass...`);
+        const proc = spawn(getYtDlpPath(), args, { timeout: 90000 });
         let stdout = '';
         let stderr = '';
 
@@ -180,11 +181,13 @@ async function getVideoInfo(url) {
                     reject(new Error('Data parsing failed.'));
                 }
             } else {
-                addLog(`yt-dlp error: ${stderr.substring(0, 100)}`);
+                addLog(`yt-dlp error: ${stderr.substring(0, 500)}`);
                 if (stderr.toLowerCase().includes('sign in') || stderr.toLowerCase().includes('bot')) {
-                    reject(new Error('YouTube block! Please refresh cookies.txt or wait 5 mins.'));
+                    reject(new Error('YouTube block! Refresh cookies.txt or wait.'));
+                } else if (stderr.toLowerCase().includes('403') || stderr.toLowerCase().includes('forbidden')) {
+                    reject(new Error('IP Block (403). Waiting for Render IP reset...'));
                 } else {
-                    reject(new Error('Video details nahi mil rahi. Link check karein.'));
+                    reject(new Error('Video nahi mila. Link sahi hai na? Check karein.'));
                 }
             }
         });
@@ -261,7 +264,7 @@ function makeClip(inputPath, startTime, duration, outputPath, options = {}) {
         ];
 
         console.log(`[FFmpeg] Starting clip: ${outputPath} starting at ${startTime}`);
-        const proc = spawn('ffmpeg', args, { timeout: 300000 });
+        const proc = spawn(ffmpeg, args, { timeout: 300000 });
 
         let stderr = '';
         proc.stderr.on('data', d => stderr += d.toString());
