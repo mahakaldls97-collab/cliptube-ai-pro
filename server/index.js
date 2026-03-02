@@ -54,14 +54,17 @@ function getYtDlpPath() {
 
 function getNodePath() { return process.execPath; }
 
+const ytdl = require('@distube/ytdl-core');
+
+// ... (existing code)
+
 // yt-dlp bypass arguments to avoid "Sign in to confirm you're not a bot"
 function baseArgs() {
     return [
         '--no-check-certificates',
-        '--prefer-insecure',
-        '--js-runtimes', 'node:' + getNodePath(),
-        '--extractor-args', 'youtube:player_client=ios,android,mweb',
-        '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+        '--no-cache-dir',
+        '--extractor-args', 'youtube:player_client=web,android',
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ];
 }
 
@@ -74,34 +77,48 @@ app.get('/api/test', (req, res) => {
     });
 });
 
-// ─── Get video info using yt-dlp ──────────────────────────────────────────────
-function getVideoInfo(url) {
-    return new Promise((resolve, reject) => {
-        const args = [
-            '--dump-json',
-            '--no-playlist',
-            '--socket-timeout', '30',
-            ...baseArgs(),
-            url
-        ];
-        const proc = spawn(getYtDlpPath(), args, { timeout: 90000 });
-        let stdout = '';
-        let stderr = '';
-        proc.stdout.on('data', d => stdout += d.toString());
-        proc.stderr.on('data', d => stderr += d.toString());
-        proc.on('close', code => {
-            if (code === 0 && stdout.trim()) {
-                try {
-                    resolve(JSON.parse(stdout.trim()));
-                } catch (e) {
-                    reject(new Error('Failed to parse video info'));
+// ─── Get video info using ytdl-core or yt-dlp ─────────────────────────────────
+async function getVideoInfo(url) {
+    // Try ytdl-core first (more stable for metadata)
+    try {
+        const info = await ytdl.getInfo(url);
+        return {
+            title: info.videoDetails.title,
+            duration: parseInt(info.videoDetails.lengthSeconds)
+        };
+    } catch (err) {
+        console.warn('[WARN] ytdl-core failed, falling back to yt-dlp:', err.message);
+        return new Promise((resolve, reject) => {
+            const args = [
+                '--dump-json',
+                '--no-playlist',
+                '--socket-timeout', '30',
+                ...baseArgs(),
+                url
+            ];
+            const proc = spawn(getYtDlpPath(), args, { timeout: 90000 });
+            let stdout = '';
+            let stderr = '';
+            proc.stdout.on('data', d => stdout += d.toString());
+            proc.stderr.on('data', d => stderr += d.toString());
+            proc.on('close', code => {
+                if (code === 0 && stdout.trim()) {
+                    try {
+                        const parsed = JSON.parse(stdout.trim());
+                        resolve({
+                            title: parsed.title,
+                            duration: parseInt(parsed.duration || 0)
+                        });
+                    } catch (e) {
+                        reject(new Error('Failed to parse video info'));
+                    }
+                } else {
+                    reject(new Error('YouTube blocking detected. Wait a few minutes or try another link.'));
                 }
-            } else {
-                reject(new Error('yt-dlp info failed: ' + (stderr.substring(0, 200) || 'Unknown error')));
-            }
+            });
+            proc.on('error', e => reject(new Error('yt-dlp not found: ' + e.message)));
         });
-        proc.on('error', e => reject(new Error('yt-dlp not found: ' + e.message)));
-    });
+    }
 }
 
 // ─── Download video using yt-dlp ─────────────────────────────────────────────
