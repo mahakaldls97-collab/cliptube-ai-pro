@@ -97,8 +97,10 @@ function baseArgs() {
         '--force-ipv4',
         '--socket-timeout', '60',
         '--geo-bypass',
-        '--extractor-args', 'youtube:player_client=android,web,ios',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        '--extractor-args', 'youtube:player_client=android,mweb,web',
+        '--user-agent', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
+        '--add-header', 'Accept-Language: en-US,en;q=0.9',
+        '--add-header', 'Referer: https://www.google.com/'
     ];
 
     const cookiesPath = path.join(__dirname, '../cookies.txt');
@@ -181,13 +183,13 @@ async function getVideoInfo(url) {
                     reject(new Error('Data parsing failed.'));
                 }
             } else {
-                addLog(`yt-dlp error: ${stderr.substring(0, 500)}`);
-                if (stderr.toLowerCase().includes('sign in') || stderr.toLowerCase().includes('bot')) {
-                    reject(new Error('YouTube block! Refresh cookies.txt or wait.'));
+                addLog(`yt-dlp error: ${stderr.substring(0, 800)}`);
+                if (stderr.toLowerCase().includes('sign in') || stderr.toLowerCase().includes('bot') || stderr.toLowerCase().includes('confirm your age')) {
+                    reject(new Error('YouTube Blocked! Need fresh cookies.txt (Get cookies.txt locally extension USE karein)'));
                 } else if (stderr.toLowerCase().includes('403') || stderr.toLowerCase().includes('forbidden')) {
-                    reject(new Error('IP Block (403). Waiting for Render IP reset...'));
+                    reject(new Error('IP Blocked on Render. Wait 10 mins or Redelpoy (Manual Deploy) karein.'));
                 } else {
-                    reject(new Error('Video nahi mila. Link sahi hai na? Check karein.'));
+                    reject(new Error('Video details nahi mili. Ek baar link check karein or logs dekhein.'));
                 }
             }
         });
