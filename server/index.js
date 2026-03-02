@@ -60,13 +60,20 @@ const ytdl = require('@distube/ytdl-core');
 
 // yt-dlp bypass arguments - The "Ghost" Strategy
 function baseArgs() {
-    return [
+    const args = [
         '--no-check-certificates',
         '--no-cache-dir',
         '--socket-timeout', '30',
         '--extractor-args', 'youtube:player_client=ios,android,mweb',
         '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
     ];
+
+    const cookiesPath = path.join(__dirname, '../cookies.txt');
+    if (fs.existsSync(cookiesPath)) {
+        args.push('--cookies', cookiesPath);
+    }
+
+    return args;
 }
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
