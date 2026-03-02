@@ -36,7 +36,7 @@ function generateId() {
 function getYtDlpPath() {
     if (process.platform !== 'win32') {
         // Check for bundled linux binary or system command
-        const bundled = path.join(__dirname, '../yt-dlp-bin');
+        const bundled = path.join(__dirname, '../yt-dlp-bin/yt-dlp');
         if (fs.existsSync(bundled)) return bundled;
         return 'yt-dlp';
     }
