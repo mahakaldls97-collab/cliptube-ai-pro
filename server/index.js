@@ -76,6 +76,19 @@ function baseArgs() {
     return args;
 }
 
+// Robust Cookie Helper for ytdl-core
+function getYtdlOptions() {
+    const options = {
+        requestOptions: {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            }
+        }
+    };
+    // Note: ytdl-core cookie handling is usually via agent or headers
+    return options;
+}
+
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.get('/api/test', (req, res) => {
     res.json({
@@ -87,8 +100,22 @@ app.get('/api/test', (req, res) => {
 
 // ─── Get video info with extreme bypass ───────────────────────────────────────
 async function getVideoInfo(url) {
+    // Strategy 1: ytdl-core (Very stable for metadata if not IP blocked)
+    try {
+        console.log(`[SYSTEM] Metadata fetch (ytdl-core) for: ${url}`);
+        const info = await ytdl.getInfo(url, getYtdlOptions());
+        if (info && info.videoDetails) {
+            return {
+                title: info.videoDetails.title || 'Untitled Video',
+                duration: parseInt(info.videoDetails.lengthSeconds || 0)
+            };
+        }
+    } catch (e) {
+        console.warn('[WARN] ytdl-core failed:', e.message);
+    }
+
+    // Strategy 2: yt-dlp with Cookies bypass (Ghost Strategy)
     return new Promise((resolve, reject) => {
-        // We use a simpler command first just to get basic JSON
         const args = [
             '--dump-json',
             '--no-playlist',
@@ -97,7 +124,7 @@ async function getVideoInfo(url) {
             url
         ];
 
-        console.log(`[SYSTEM] Attempting bypass for: ${url}`);
+        console.log(`[SYSTEM] Metadata fetch (yt-dlp) for: ${url}`);
         const proc = spawn(getYtDlpPath(), args, { timeout: 60000 });
         let stdout = '';
         let stderr = '';
@@ -114,14 +141,14 @@ async function getVideoInfo(url) {
                         duration: parseInt(parsed.duration || 0)
                     });
                 } catch (e) {
-                    reject(new Error('Data parsing failed. YouTube might have changed their format.'));
+                    reject(new Error('Data extraction failed. Refresh cookies?'));
                 }
             } else {
                 console.error('[BYPASS FAIL]', stderr);
-                if (stderr.includes('Sign in')) {
-                    reject(new Error('YouTube ne block kar diya hai. Dusra link try karein ya 5 min baad koshish karein.'));
+                if (stderr.toLowerCase().includes('sign in') || stderr.toLowerCase().includes('bot')) {
+                    reject(new Error('YouTube block! Please refresh the cookies.txt from YouTube.com'));
                 } else {
-                    reject(new Error('Video details nahi mil pa rahi hain. Link ek baar check karle.'));
+                    reject(new Error('Video nahi mila. Link sahi hai na? Check karein.'));
                 }
             }
         });
