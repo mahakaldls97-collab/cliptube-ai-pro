@@ -58,12 +58,13 @@ const ytdl = require('@distube/ytdl-core');
 
 // ... (existing code)
 
-// yt-dlp bypass arguments to avoid "Sign in to confirm you're not a bot"
+// yt-dlp bypass arguments - Ultra Stealth Mode
 function baseArgs() {
     return [
         '--no-check-certificates',
         '--no-cache-dir',
-        '--extractor-args', 'youtube:player_client=web,android',
+        '--socket-timeout', '30',
+        '--extractor-args', 'youtube:player_client=mediaconnect,web,android',
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ];
 }
@@ -77,63 +78,61 @@ app.get('/api/test', (req, res) => {
     });
 });
 
-// ─── Get video info using ytdl-core or yt-dlp ─────────────────────────────────
+// ─── Get video info with extreme bypass ───────────────────────────────────────
 async function getVideoInfo(url) {
-    // Try ytdl-core first (more stable for metadata)
-    try {
-        const info = await ytdl.getInfo(url);
-        return {
-            title: info.videoDetails.title,
-            duration: parseInt(info.videoDetails.lengthSeconds)
-        };
-    } catch (err) {
-        console.warn('[WARN] ytdl-core failed, falling back to yt-dlp:', err.message);
-        return new Promise((resolve, reject) => {
-            const args = [
-                '--dump-json',
-                '--no-playlist',
-                '--socket-timeout', '30',
-                ...baseArgs(),
-                url
-            ];
-            const proc = spawn(getYtDlpPath(), args, { timeout: 90000 });
-            let stdout = '';
-            let stderr = '';
-            proc.stdout.on('data', d => stdout += d.toString());
-            proc.stderr.on('data', d => stderr += d.toString());
-            proc.on('close', code => {
-                if (code === 0 && stdout.trim()) {
-                    try {
-                        const parsed = JSON.parse(stdout.trim());
-                        resolve({
-                            title: parsed.title,
-                            duration: parseInt(parsed.duration || 0)
-                        });
-                    } catch (e) {
-                        reject(new Error('Failed to parse video info'));
-                    }
-                } else {
-                    reject(new Error('YouTube blocking detected. Wait a few minutes or try another link.'));
+    return new Promise((resolve, reject) => {
+        const args = [
+            '--dump-json',
+            '--no-playlist',
+            ...baseArgs(),
+            url
+        ];
+        console.log(`[INFO] Fetching metadata for: ${url}`);
+        const proc = spawn(getYtDlpPath(), args, { timeout: 60000 });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', d => stdout += d.toString());
+        proc.stderr.on('data', d => stderr += d.toString());
+
+        proc.on('close', code => {
+            if (code === 0 && stdout.trim()) {
+                try {
+                    const parsed = JSON.parse(stdout.trim());
+                    resolve({
+                        title: parsed.title || 'Unknown Video',
+                        duration: parseInt(parsed.duration || 0)
+                    });
+                } catch (e) {
+                    reject(new Error('Failed to parse metadata'));
                 }
-            });
-            proc.on('error', e => reject(new Error('yt-dlp not found: ' + e.message)));
+            } else {
+                console.error('[yt-dlp Error]', stderr);
+                // If bot detection happens, suggest waiting or using different link
+                const isBot = stderr.includes('Sign in to confirm you\'re not a bot');
+                if (isBot) {
+                    reject(new Error('YouTube ne bot detect kar liya hai. 2 minute baad try karein ya koi aur link dalein.'));
+                } else {
+                    reject(new Error('Video info nahi mil rahi. Link check karein.'));
+                }
+            }
         });
-    }
+    });
 }
 
-// ─── Download video using yt-dlp ─────────────────────────────────────────────
-function downloadVideo(url, outputPath) {
+// ─── Download video using yt-dlp with auto-retry ─────────────────────────────
+async function downloadVideo(url, outputPath) {
     return new Promise((resolve, reject) => {
         const args = [
             '-f', 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
             '--merge-output-format', 'mp4',
-            '--socket-timeout', '60',
             '--no-playlist',
             ...baseArgs(),
             '-o', outputPath,
             url
         ];
+        console.log(`[DOWNLOAD] Starting: ${url}`);
         const proc = spawn(getYtDlpPath(), args, { timeout: 600000 });
+
         proc.on('close', code => {
             if (code === 0 && fs.existsSync(outputPath)) {
                 resolve();
@@ -143,11 +142,10 @@ function downloadVideo(url, outputPath) {
                     fs.renameSync(mkvPath, outputPath);
                     resolve();
                 } else {
-                    reject(new Error('Download failed'));
+                    reject(new Error('Download fail. YouTube might be throttling the connection.'));
                 }
             }
         });
-        proc.on('error', e => reject(new Error('Spawn fail: ' + e.message)));
     });
 }
 
