@@ -64,13 +64,16 @@ function baseArgs() {
         '--no-check-certificates',
         '--no-cache-dir',
         '--socket-timeout', '30',
-        '--extractor-args', 'youtube:player_client=ios,android,mweb',
-        '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+        '--extractor-args', 'youtube:player_client=web',
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ];
 
     const cookiesPath = path.join(__dirname, '../cookies.txt');
     if (fs.existsSync(cookiesPath)) {
+        console.log('[SYSTEM] Using Cookies bypass from:', cookiesPath);
         args.push('--cookies', cookiesPath);
+    } else {
+        console.warn('[WARNING] cookies.txt NOT found!');
     }
 
     return args;
