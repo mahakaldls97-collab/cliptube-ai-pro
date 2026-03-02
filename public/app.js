@@ -17,6 +17,9 @@ const resultsSubtitle = document.getElementById('resultsSubtitle');
 const clipsSlider = document.getElementById('clipsSlider');
 const clipsValueDisplay = document.getElementById('clipsValueDisplay');
 const presetBtns = document.querySelectorAll('.preset-btn');
+const autoCaptions = document.getElementById('autoCaptions');
+const bgMusic = document.getElementById('bgMusic');
+const smartFace = document.getElementById('smartFace');
 
 let pollInterval = null;
 let renderedCount = 0;
@@ -64,10 +67,16 @@ generateBtn.addEventListener('click', async () => {
     showStatus('⏳', 'Shuru ho raha hai...', 'YouTube se video info le raha hoon...');
 
     try {
+        const options = {
+            captions: autoCaptions.checked,
+            bgMusic: bgMusic.checked,
+            smartFace: smartFace.checked
+        };
+
         const res = await fetch(`${API_BASE}/api/process`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, numClips: selectedClips })
+            body: JSON.stringify({ url, numClips: selectedClips, options })
         });
 
         const data = await res.json();

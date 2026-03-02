@@ -35,9 +35,16 @@ function generateId() {
 // ─── Find yt-dlp binary ───────────────────────────────────────────────────────
 function getYtDlpPath() {
     if (process.platform !== 'win32') {
-        // Check for bundled linux binary or system command
         const bundled = path.join(__dirname, '../yt-dlp-bin/yt-dlp');
-        if (fs.existsSync(bundled)) return bundled;
+        if (fs.existsSync(bundled)) {
+            try {
+                // Ensure executable permissions from Node.js
+                fs.chmodSync(bundled, 0o755);
+            } catch (e) {
+                console.warn('[WARN] Could not chmod yt-dlp binary:', e.message);
+            }
+            return bundled;
+        }
         return 'yt-dlp';
     }
     const localExe = path.join(__dirname, '../yt-dlp.exe');
@@ -128,16 +135,26 @@ function downloadVideo(url, outputPath) {
 }
 
 // ─── FFmpeg Processing ────────────────────────────────────────────────────────
-function makeClip(inputPath, startTime, duration, outputPath) {
+function makeClip(inputPath, startTime, duration, outputPath, options = {}) {
     return new Promise((resolve, reject) => {
+        const filters = [
+            'scale=1080:1920:force_original_aspect_ratio=increase',
+            'crop=1080:1920',
+            'setsar=1'
+        ];
+
+        // Placeholder for Smart Face-Crop (will modify crop dynamically in future)
+        if (options.smartFace) {
+            console.log('[DEBUG] Smart Face Crop requested (Feature coming soon!)');
+        }
+
         const args = [
             '-nostdin',
             '-y',
             '-ss', String(startTime),
             '-i', inputPath,
             '-t', String(duration),
-            // Improved 9:16 crop filter (Full screen without black bars)
-            '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1',
+            '-vf', filters.join(','),
             '-c:v', 'libx264',
             '-profile:v', 'high',
             '-level', '4.1',
@@ -153,10 +170,19 @@ function makeClip(inputPath, startTime, duration, outputPath) {
             '-pix_fmt', 'yuv420p',
             outputPath
         ];
+
+        console.log(`[FFmpeg] Starting clip: ${outputPath} starting at ${startTime}`);
         const proc = spawn('ffmpeg', args, { timeout: 300000 });
+
+        let stderr = '';
+        proc.stderr.on('data', d => stderr += d.toString());
+
         proc.on('close', code => {
             if (code === 0) resolve();
-            else reject(new Error('FFmpeg clip failed'));
+            else {
+                console.error('[FFmpeg ERROR]', stderr);
+                reject(new Error('FFmpeg clip failed - check logs for details'));
+            }
         });
     });
 }
@@ -192,7 +218,7 @@ async function processVideo(jobId, url, numClips) {
             // Wait a small bit to let the UI show the status
             await new Promise(r => setTimeout(r, 800));
 
-            await makeClip(tempPath, start, clipDur, outPath);
+            await makeClip(tempPath, start, clipDur, outPath, jobs[jobId].options);
 
             jobs[jobId].clips.push({
                 id: i,
@@ -217,12 +243,21 @@ async function processVideo(jobId, url, numClips) {
 }
 
 app.post('/api/process', async (req, res) => {
-    const { url, numClips } = req.body;
+    const { url, numClips, options = {} } = req.body;
     if (!url) return res.status(400).json({ error: 'URL required' });
+
+    console.log(`[JOB] New request: ${url} (Clips: ${numClips})`);
 
     const count = Math.min(30, Math.max(1, parseInt(numClips) || 15));
     const jobId = generateId();
-    jobs[jobId] = { status: 'starting', progress: 0, clips: [], title: 'Loading...', totalClips: count };
+    jobs[jobId] = {
+        status: 'starting',
+        progress: 0,
+        clips: [],
+        title: 'Loading...',
+        totalClips: count,
+        options // options like captions, bgMusic, smartFace
+    };
     res.json({ jobId });
 
     processVideo(jobId, url, count);
