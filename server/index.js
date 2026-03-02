@@ -58,6 +58,15 @@ const ytdl = require('@distube/ytdl-core');
 
 // ... (existing code)
 
+// Array to store last few logs for debugging
+let lastLogs = [];
+function addLog(msg) {
+    const entry = `${new Date().toLocaleTimeString()}: ${msg}`;
+    console.log(entry);
+    lastLogs.push(entry);
+    if (lastLogs.length > 50) lastLogs.shift();
+}
+
 // Helper to parse Netscape Cookies for ytdl-core headers
 function getCookieString() {
     const cookiesPath = path.join(__dirname, '../cookies.txt');
@@ -85,8 +94,9 @@ function baseArgs() {
     const args = [
         '--no-check-certificates',
         '--no-cache-dir',
+        '--force-ipv4', // CRITICAL: Cloud servers are often blocked on IPv6
         '--socket-timeout', '30',
-        '--extractor-args', 'youtube:player_client=web',
+        '--extractor-args', 'youtube:player_client=ios,android,mweb,web,tv',
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ];
 
@@ -108,13 +118,20 @@ app.get('/api/test', (req, res) => {
     });
 });
 
+app.get('/api/logs', (req, res) => {
+    res.send(`<html><body style="background:#111;color:#0f0;font-family:monospace;padding:20px;">
+        <h2>ClipTube Debug Logs</h2>
+        ${lastLogs.reverse().join('<br>')}
+    </body></html>`);
+});
+
 // ─── Get video info with extreme bypass ───────────────────────────────────────
 async function getVideoInfo(url) {
     const cookieString = getCookieString();
 
     // Strategy 1: ytdl-core with Header Cookies
     try {
-        console.log(`[SYSTEM] Metadata fetch (ytdl-core) for: ${url}`);
+        addLog(`Trying ytdl-core for: ${url.substring(0, 30)}...`);
         const options = {
             requestOptions: {
                 headers: {
@@ -131,7 +148,7 @@ async function getVideoInfo(url) {
             };
         }
     } catch (e) {
-        console.warn('[WARN] ytdl-core failed, falling back:', e.message);
+        addLog(`ytdl-core bypass fail: ${e.message}`);
     }
 
     // Strategy 2: yt-dlp Ghost Strategy
@@ -143,7 +160,7 @@ async function getVideoInfo(url) {
             url
         ];
 
-        console.log(`[SYSTEM] Metadata fetch (yt-dlp) for: ${url}`);
+        addLog(`Trying yt-dlp Ghost Bypass (IPv4)...`);
         const proc = spawn(getYtDlpPath(), args, { timeout: 60000 });
         let stdout = '';
         let stderr = '';
@@ -160,14 +177,14 @@ async function getVideoInfo(url) {
                         duration: parseInt(parsed.duration || 0)
                     });
                 } catch (e) {
-                    reject(new Error('Data parsing failed. YouTube format changed?'));
+                    reject(new Error('Data parsing failed.'));
                 }
             } else {
-                console.error('[BYPASS FAIL]', stderr);
+                addLog(`yt-dlp error: ${stderr.substring(0, 100)}`);
                 if (stderr.toLowerCase().includes('sign in') || stderr.toLowerCase().includes('bot')) {
                     reject(new Error('YouTube block! Please refresh cookies.txt or wait 5 mins.'));
                 } else {
-                    reject(new Error('Video details nahi mil pa rahi hain. Link ek baar check karle.'));
+                    reject(new Error('Video details nahi mil rahi. Link check karein.'));
                 }
             }
         });
