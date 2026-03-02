@@ -97,10 +97,11 @@ function baseArgs() {
         '--force-ipv4',
         '--socket-timeout', '60',
         '--geo-bypass',
-        '--extractor-args', 'youtube:player_client=android,mweb,web',
+        '--extractor-args', 'youtube:player_client=android,mweb',
         '--user-agent', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
         '--add-header', 'Accept-Language: en-US,en;q=0.9',
-        '--add-header', 'Referer: https://www.google.com/'
+        '--add-header', 'Referer: https://www.google.com/',
+        '--no-warnings'
     ];
 
     const cookiesPath = path.join(__dirname, '../cookies.txt');
@@ -183,11 +184,11 @@ async function getVideoInfo(url) {
                     reject(new Error('Data parsing failed.'));
                 }
             } else {
-                addLog(`yt-dlp error: ${stderr.substring(0, 800)}`);
+                addLog(`yt-dlp full error: ${stderr.substring(0, 2000)}`);
                 if (stderr.toLowerCase().includes('sign in') || stderr.toLowerCase().includes('bot') || stderr.toLowerCase().includes('confirm your age')) {
-                    reject(new Error('YouTube Blocked! Need fresh cookies.txt (Get cookies.txt locally extension USE karein)'));
+                    reject(new Error('YouTube Blocked! Naya cookies.txt upload karein.'));
                 } else if (stderr.toLowerCase().includes('403') || stderr.toLowerCase().includes('forbidden')) {
-                    reject(new Error('IP Blocked on Render. Wait 10 mins or Redelpoy (Manual Deploy) karein.'));
+                    reject(new Error('IP Blocked (403). Render par "Manual Deploy" button dabayein refresh ke liye.'));
                 } else {
                     reject(new Error('Video details nahi mili. Ek baar link check karein or logs dekhein.'));
                 }
