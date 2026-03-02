@@ -58,14 +58,14 @@ const ytdl = require('@distube/ytdl-core');
 
 // ... (existing code)
 
-// yt-dlp bypass arguments - Ultra Stealth Mode
+// yt-dlp bypass arguments - The "Ghost" Strategy
 function baseArgs() {
     return [
         '--no-check-certificates',
         '--no-cache-dir',
         '--socket-timeout', '30',
-        '--extractor-args', 'youtube:player_client=mediaconnect,web,android',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        '--extractor-args', 'youtube:player_client=ios,android,mweb',
+        '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
     ];
 }
 
@@ -81,16 +81,20 @@ app.get('/api/test', (req, res) => {
 // ─── Get video info with extreme bypass ───────────────────────────────────────
 async function getVideoInfo(url) {
     return new Promise((resolve, reject) => {
+        // We use a simpler command first just to get basic JSON
         const args = [
             '--dump-json',
             '--no-playlist',
+            '--flat-playlist',
             ...baseArgs(),
             url
         ];
-        console.log(`[INFO] Fetching metadata for: ${url}`);
+
+        console.log(`[SYSTEM] Attempting bypass for: ${url}`);
         const proc = spawn(getYtDlpPath(), args, { timeout: 60000 });
         let stdout = '';
         let stderr = '';
+
         proc.stdout.on('data', d => stdout += d.toString());
         proc.stderr.on('data', d => stderr += d.toString());
 
@@ -99,50 +103,50 @@ async function getVideoInfo(url) {
                 try {
                     const parsed = JSON.parse(stdout.trim());
                     resolve({
-                        title: parsed.title || 'Unknown Video',
+                        title: parsed.title || 'Untitled ClipTube Video',
                         duration: parseInt(parsed.duration || 0)
                     });
                 } catch (e) {
-                    reject(new Error('Failed to parse metadata'));
+                    reject(new Error('Data parsing failed. YouTube might have changed their format.'));
                 }
             } else {
-                console.error('[yt-dlp Error]', stderr);
-                // If bot detection happens, suggest waiting or using different link
-                const isBot = stderr.includes('Sign in to confirm you\'re not a bot');
-                if (isBot) {
-                    reject(new Error('YouTube ne bot detect kar liya hai. 2 minute baad try karein ya koi aur link dalein.'));
+                console.error('[BYPASS FAIL]', stderr);
+                if (stderr.includes('Sign in')) {
+                    reject(new Error('YouTube ne block kar diya hai. Dusra link try karein ya 5 min baad koshish karein.'));
                 } else {
-                    reject(new Error('Video info nahi mil rahi. Link check karein.'));
+                    reject(new Error('Video details nahi mil pa rahi hain. Link ek baar check karle.'));
                 }
             }
         });
     });
 }
 
-// ─── Download video using yt-dlp with auto-retry ─────────────────────────────
+// ─── Download video with optimized settings ──────────────────────────────────
 async function downloadVideo(url, outputPath) {
     return new Promise((resolve, reject) => {
         const args = [
-            '-f', 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
-            '--merge-output-format', 'mp4',
+            '-f', 'best[height<=720][ext=mp4]', // Force MP4 720p for speed
             '--no-playlist',
             ...baseArgs(),
             '-o', outputPath,
             url
         ];
-        console.log(`[DOWNLOAD] Starting: ${url}`);
+
+        console.log(`[BYPASS] Downloading video...`);
         const proc = spawn(getYtDlpPath(), args, { timeout: 600000 });
 
         proc.on('close', code => {
             if (code === 0 && fs.existsSync(outputPath)) {
                 resolve();
             } else {
-                const mkvPath = outputPath.replace('.mp4', '.mkv');
-                if (fs.existsSync(mkvPath)) {
-                    fs.renameSync(mkvPath, outputPath);
+                // Secondary check for partial downloads that might have worked
+                const files = fs.readdirSync(path.dirname(outputPath));
+                const partial = files.find(f => f.includes(path.basename(outputPath, '.mp4')));
+                if (partial) {
+                    fs.renameSync(path.join(path.dirname(outputPath), partial), outputPath);
                     resolve();
                 } else {
-                    reject(new Error('Download fail. YouTube might be throttling the connection.'));
+                    reject(new Error('Download fail ho gaya. YouTube connection drop kar raha hai.'));
                 }
             }
         });
