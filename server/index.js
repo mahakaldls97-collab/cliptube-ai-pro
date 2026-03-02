@@ -115,6 +115,7 @@ function baseArgs() {
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.get('/api/test', (req, res) => {
     res.json({
+        build: 'v1.0.4-super-fix',
         platform: process.platform,
         nodeVersion: process.version,
         ytdlpPath: getYtDlpPath(),
