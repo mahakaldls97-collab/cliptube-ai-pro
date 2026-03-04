@@ -54,7 +54,8 @@ function getYtDlpPath() {
 
 function getNodePath() { return process.execPath; }
 
-const ytdl = require('@distube/ytdl-core');
+// ytdl-core removed - causes ENOTFOUND DNS error on Hugging Face
+// Using yt-dlp only strategy
 
 // ... (existing code)
 
@@ -130,92 +131,174 @@ app.get('/api/logs', (req, res) => {
     </body></html>`);
 });
 
-// ─── Get video info with extreme bypass ───────────────────────────────────────
-async function getVideoInfo(url) {
-    const cookieString = getCookieString();
+// ─── Get video info using yt-dlp ONLY (ytdl-core removed - DNS blocked on HF) ──
+async function getVideoInfo(url, useCookies = true) {
+    // Try multiple player clients for maximum compatibility on Hugging Face
+    const clientStrategies = [
+        'android,mweb',
+        'tv_embedded,web',
+        'mweb,web',
+        'android'
+    ];
 
-    // Strategy 1: ytdl-core with Header Cookies
-    try {
-        addLog(`Trying ytdl-core for: ${url.substring(0, 30)}...`);
-        const options = {
-            requestOptions: {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                    'Cookie': cookieString
-                }
-            }
-        };
-        const info = await ytdl.getInfo(url, options);
-        if (info && info.videoDetails) {
-            return {
-                title: info.videoDetails.title || 'Untitled Video',
-                duration: parseInt(info.videoDetails.lengthSeconds || 0)
-            };
+    let lastError = null;
+
+    for (const clientStr of clientStrategies) {
+        try {
+            const result = await tryYtDlpInfo(url, clientStr, useCookies);
+            return result;
+        } catch (e) {
+            addLog(`[Strategy ${clientStr}] failed: ${e.message.substring(0, 100)}`);
+            lastError = e;
         }
-    } catch (e) {
-        addLog(`ytdl-core bypass fail: ${e.message}`);
     }
 
-    // Strategy 2: yt-dlp Ghost Strategy
+    // If all yt-dlp strategies fail, try oEmbed (no YouTube DNS needed)
+    try {
+        addLog('All yt-dlp strategies failed. Trying YouTube oEmbed fallback...');
+        return await getInfoFromOEmbed(url);
+    } catch (e) {
+        addLog(`oEmbed also failed: ${e.message}`);
+    }
+
+    throw lastError || new Error('All video info strategies failed.');
+}
+
+function tryYtDlpInfo(url, playerClient, useCookies) {
     return new Promise((resolve, reject) => {
         const args = [
             '--dump-json',
             '--no-playlist',
-            ...baseArgs(),
-            url
+            '--no-warnings',
+            '--socket-timeout', '30',
+            '--extractor-args', `youtube:player_client=${playerClient}`,
+            '--user-agent', 'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+            '--add-header', 'Accept-Language:en-US,en;q=0.9'
         ];
 
-        addLog(`Trying yt-dlp Ghost Bypass...`);
-        const proc = spawn(getYtDlpPath(), args, { timeout: 90000 });
+        if (useCookies) {
+            const cookiesPath = path.join(__dirname, '../cookies.txt');
+            if (fs.existsSync(cookiesPath)) {
+                args.push('--cookies', cookiesPath);
+            }
+        }
+
+        args.push(url);
+
+        addLog(`Trying yt-dlp [${playerClient}] for: ${url.substring(0, 40)}...`);
+        const proc = spawn(getYtDlpPath(), args, { timeout: 60000 });
         let stdout = '';
         let stderr = '';
 
         proc.stdout.on('data', d => stdout += d.toString());
         proc.stderr.on('data', d => stderr += d.toString());
 
-        proc.on('close', code => {
+        proc.on('close', (code) => {
             if (code === 0 && stdout.trim()) {
                 try {
                     const parsed = JSON.parse(stdout.trim());
+                    addLog(`[SUCCESS] Got info: ${parsed.title}`);
                     resolve({
                         title: parsed.title || 'Untitled ClipTube Video',
                         duration: parseInt(parsed.duration || 0)
                     });
                 } catch (e) {
-                    reject(new Error('Data parsing failed.'));
+                    reject(new Error('JSON parse failed'));
                 }
             } else {
-                addLog(`yt-dlp full error: ${stderr.substring(0, 2000)}`);
-                if (stderr.toLowerCase().includes('sign in') || stderr.toLowerCase().includes('bot') || stderr.toLowerCase().includes('confirm your age')) {
-                    reject(new Error('YouTube Blocked! Naya cookies.txt upload karein.'));
-                } else if (stderr.toLowerCase().includes('403') || stderr.toLowerCase().includes('forbidden')) {
-                    reject(new Error('IP Blocked (403). Render par "Manual Deploy" button dabayein refresh ke liye.'));
-                } else {
-                    reject(new Error('Video details nahi mili. Ek baar link check karein or logs dekhein.'));
-                }
+                reject(new Error(stderr.substring(0, 200) || 'yt-dlp returned non-zero'));
             }
         });
+
+        proc.on('error', (e) => reject(new Error(`yt-dlp spawn error: ${e.message}`)));
     });
 }
 
+// Fallback: YouTube oEmbed API (no auth, avoids DNS issues)
+function getInfoFromOEmbed(url) {
+    return new Promise((resolve, reject) => {
+        const https = require('https');
+        const encodedUrl = encodeURIComponent(url);
+        const oembedUrl = `https://www.youtube.com/oembed?url=${encodedUrl}&format=json`;
+        addLog(`Trying oEmbed: ${oembedUrl}`);
+
+        https.get(oembedUrl, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    resolve({
+                        title: json.title || 'YouTube Video',
+                        duration: 300 // oEmbed doesn't give duration; use default 5 min
+                    });
+                } catch (e) {
+                    reject(new Error(`oEmbed parse failed: ${e.message}`));
+                }
+            });
+        }).on('error', (e) => reject(new Error(`oEmbed request failed: ${e.message}`)));
+    });
+}
+
+// Update baseArgs to take useCookies param
+function baseArgs(useCookies = true) {
+    const args = [
+        '--no-check-certificates',
+        '--no-cache-dir',
+        '--force-ipv4',
+        '--socket-timeout', '60',
+        '--geo-bypass',
+        '--extractor-args', 'youtube:player_client=android,mweb',
+        '--user-agent', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
+        '--add-header', 'Accept-Language: en-US,en;q=0.9',
+        '--add-header', 'Referer: https://www.google.com/',
+        '--no-warnings'
+    ];
+
+    if (useCookies) {
+        const cookiesPath = path.join(__dirname, '../cookies.txt');
+        if (fs.existsSync(cookiesPath)) {
+            args.push('--cookies', cookiesPath);
+        }
+    }
+
+    return args;
+}
+
 // ─── Download video with optimized settings ──────────────────────────────────
-async function downloadVideo(url, outputPath) {
+async function downloadVideo(url, outputPath, useCookies = true) {
     return new Promise((resolve, reject) => {
         const args = [
             '-f', 'best[height<=720][ext=mp4]', // Force MP4 720p for speed
             '--no-playlist',
-            ...baseArgs(),
+            ...baseArgs(useCookies),
             '-o', outputPath,
             url
         ];
 
-        console.log(`[BYPASS] Downloading video...`);
+        console.log(`[BYPASS] Downloading video (Cookies: ${useCookies})...`);
         const proc = spawn(getYtDlpPath(), args, { timeout: 600000 });
+        let stderr = '';
+        proc.stderr.on('data', d => stderr += d.toString());
 
-        proc.on('close', code => {
+        proc.on('close', async (code) => {
             if (code === 0 && fs.existsSync(outputPath)) {
                 resolve();
             } else {
+                console.error(`[yt-dlp ERROR] ${stderr.substring(0, 1000)}`);
+
+                // If failed with cookies, retry without
+                if (useCookies && fs.existsSync(path.join(__dirname, '../cookies.txt'))) {
+                    console.log('[BYPASS] Download failed with cookies, retrying WITHOUT cookies...');
+                    try {
+                        await downloadVideo(url, outputPath, false);
+                        resolve();
+                    } catch (retryErr) {
+                        reject(retryErr);
+                    }
+                    return;
+                }
+
                 // Secondary check for partial downloads that might have worked
                 const files = fs.readdirSync(path.dirname(outputPath));
                 const partial = files.find(f => f.includes(path.basename(outputPath, '.mp4')));
@@ -223,7 +306,7 @@ async function downloadVideo(url, outputPath) {
                     fs.renameSync(path.join(path.dirname(outputPath), partial), outputPath);
                     resolve();
                 } else {
-                    reject(new Error('Download fail ho gaya. YouTube connection drop kar raha hai.'));
+                    reject(new Error('Download fail ho gaya. YouTube block kar raha hai.'));
                 }
             }
         });
